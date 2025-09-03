@@ -1,0 +1,36 @@
+cmake_minimum_required(VERSION 3.10)
+project(SAT_DPLL_%Sudoku)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# 源文件和头文件路径
+set(SRC_DIR "src")
+set(INCLUDE_DIR "include")
+
+# 所有源文件
+file(GLOB SRC_FILES
+    "${SRC_DIR}/*.cpp"
+)
+
+# 可执行文件输出名
+set(EXECUTABLE_NAME sudoku_solver)
+
+# 添加可执行文件
+add_executable(${EXECUTABLE_NAME} ${SRC_FILES})
+target_link_libraries(sudoku_solver pthread)
+
+# 包含头文件目录
+target_include_directories(${EXECUTABLE_NAME} PRIVATE ${INCLUDE_DIR})
+
+# 编译选项
+if(MSVC)
+    target_compile_options(${EXECUTABLE_NAME} PRIVATE /W4)
+else()
+    target_compile_options(${EXECUTABLE_NAME} PRIVATE -Wall -O2)
+endif()
+
+# 输出提示
+message(STATUS "源文件: ${SRC_FILES}")
+message(STATUS "头文件目录: ${INCLUDE_DIR}")
+message(STATUS "可执行文件: ${EXECUTABLE_NAME}")
