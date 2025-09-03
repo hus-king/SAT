@@ -208,22 +208,13 @@ public:
 };
 
 /**
- * @brief 高效双核DPLL求解器
- */
-int DPLL_DualCore_Fast(SATList*& cnf, int value[]);
-
-/**
  * @brief 高效DPLL算法实现
  */
 bool FastDPLL(FastCNF& cnf);
 
 /**
- * @brief 并行DPLL线程函数
+ * @brief 高效单线程DPLL算法实现
  */
-void parallel_dpll_thread(FastCNF cnf_copy, int branch_var, bool branch_value, 
-                         std::atomic<bool>& solution_found, 
-                         std::atomic<bool>& result_ready,
-                         std::vector<VarState>& global_solution,
-                         std::mutex& solution_mutex);
+bool FastDPLL_SingleThread(FastCNF& cnf);
 
 #endif // CNF_H
