@@ -92,6 +92,22 @@ int addClause(SATList* cnf, SATList*& root);
  * @return 包含空子句返回1，否则返回0
  */
 int emptyClause(SATList* cnf);
+
+/**
+ * @brief 寻找CNF公式中的单子句
+ * @param cnf CNF公式链表
+ * @return 找到单子句返回指向该文字的指针，否则返回nullptr
+ */
+SATNode* unitClause(SATList* cnf);
+
+/**
+ * @brief 支持早期停止的DPLL算法
+ * @param cnf CNF公式链表
+ * @param value 变量赋值数组
+ * @return 1表示SAT，0表示UNSAT，-1表示被中断
+ */
+int DPLL_WithEarlyStop(SATList*& cnf, int value[]);
+
 /**
  * @brief DPLL算法主函数，求解SAT问题
  * @param cnf CNF公式链表
@@ -124,5 +140,111 @@ void CopyClause(SATList*& a, SATList* b);
  * @return 写入成功返回1，失败返回0
  */
 int WriteFile(int result, double time, int value[]);
+
+// ==================== 高效数据结构定义 ====================
+
+/**
+ * @brief 变量状态枚举
+ */
+enum VarState {
+    VAR_UNASSIGNED = -1,
+    VAR_FALSE = 0,
+    VAR_TRUE = 1
+};
+
+/**
+ * @brief 回溯栈项目，记录每次赋值操作
+ */
+struct TrailItem {
+    int var;                    ///< 被赋值的变量
+    VarState old_value;         ///< 变量的旧值
+    int decision_level;         ///< 决策层级
+    bool is_decision;           ///< 是否为决策变量（非传播）
+};
+
+/**
+ * @brief 高效CNF公式表示
+ */
+class FastCNF {
+public:
+    std::vector<std::vector<int>> clauses;      ///< 子句集合，每个子句是文字数组
+    std::vector<VarState> assignment;           ///< 变量赋值状态
+    std::vector<TrailItem> trail;               ///< 回溯栈
+    std::vector<bool> clause_satisfied;         ///< 子句是否已满足
+    std::vector<int> clause_watch_count;        ///< 每个子句的未满足文字数
+    int num_vars;                               ///< 变量总数
+    int decision_level;                         ///< 当前决策层级
+    
+    FastCNF(int vars = 0) : num_vars(vars), decision_level(0) {
+        assignment.resize(vars + 1, VAR_UNASSIGNED);
+    }
+    
+    /**
+     * @brief 从传统链表结构转换
+     */
+    void fromSATList(SATList* cnf);
+    
+    /**
+     * @brief 转换回传统链表结构（兼容性）
+     */
+    SATList* toSATList() const;
+    
+    /**
+     * @brief 深拷贝（用于并行）
+     */
+    FastCNF copy() const;
+    
+    /**
+     * @brief 检查是否有空子句
+     */
+    bool hasEmptyClause() const;
+    
+    /**
+     * @brief 检查是否所有子句都满足
+     */
+    bool allClausesSatisfied() const;
+    
+    /**
+     * @brief 单子句传播
+     */
+    bool unitPropagate();
+    
+    /**
+     * @brief 赋值变量并记录到trail
+     */
+    void assign(int var, VarState value, bool is_decision = false);
+    
+    /**
+     * @brief 回溯到指定层级
+     */
+    void backtrack(int level);
+    
+    /**
+     * @brief 选择下一个分支变量
+     */
+    int chooseBranchVariable() const;
+    
+private:
+    void updateClauseStatus();
+};
+
+/**
+ * @brief 高效双核DPLL求解器
+ */
+int DPLL_DualCore_Fast(SATList*& cnf, int value[]);
+
+/**
+ * @brief 高效DPLL算法实现
+ */
+bool FastDPLL(FastCNF& cnf);
+
+/**
+ * @brief 并行DPLL线程函数
+ */
+void parallel_dpll_thread(FastCNF cnf_copy, int branch_var, bool branch_value, 
+                         std::atomic<bool>& solution_found, 
+                         std::atomic<bool>& result_ready,
+                         std::vector<VarState>& global_solution,
+                         std::mutex& solution_mutex);
 
 #endif // CNF_H
