@@ -485,299 +485,6 @@ int WriteFile(int result, double time, int value[])
     return 1;
 }
 
-// ==================== 双核优化DPLL实现 ====================
-
-// 全局变量用于线程间通信
-static std::atomic<bool> solution_found(false);
-static std::atomic<bool> thread1_started(false);
-static std::atomic<bool> thread1_finished(false);
-static std::atomic<int> global_result(0);
-static std::mutex value_mutex;
-static int* global_value = nullptr;
-
-/**
- * @brief 优化的线程执行函数 - 支持抢占式并行
- * @param cnf CNF公式副本
- * @param value 变量赋值数组
- * @param first_var 第一个分支变量
- * @param assignment 对第一个变量的赋值（1或0）
- * @param thread_id 线程标识（1或2）
- */
-void dpll_thread_func_optimized(SATList* cnf, int* value, int first_var, int assignment, int thread_id) {
-    // 线程2需要等待线程1开始一段时间后再启动，避免重复工作
-    if (thread_id == 2) {
-        // 等待线程1开始工作
-        while (!thread1_started.load() && !solution_found.load()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
-        }
-        
-        // 如果线程1已经找到解或很快完成，则不需要启动线程2
-        if (solution_found.load() || thread1_finished.load()) {
-            destroyClause(cnf);
-            return;
-        }
-        
-        // 给线程1一个短暂的优先时间窗口
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        
-        // 再次检查是否需要继续
-        if (solution_found.load()) {
-            destroyClause(cnf);
-            return;
-        }
-    }
-    
-    // 标记线程1已开始
-    if (thread_id == 1) {
-        thread1_started.store(true);
-    }
-    
-    // 设置第一个分支变量的赋值
-    value[first_var] = assignment;
-    
-    // 应用单子句传播
-    SATList* branch = (SATList*)malloc(sizeof(SATList));
-    branch->head = (SATNode*)malloc(sizeof(SATNode));
-    branch->head->data = assignment ? first_var : -first_var;
-    branch->head->next = nullptr;
-    branch->next = nullptr;
-    
-    addClause(branch, cnf);
-    
-    // 运行DPLL求解，并定期检查是否应该停止
-    int result = DPLL_WithEarlyStop(cnf, value);
-    
-    // 标记线程1完成
-    if (thread_id == 1) {
-        thread1_finished.store(true);
-    }
-    
-    // 如果找到解且是第一个找到的
-    if (result == 1 && !solution_found.exchange(true)) {
-        std::lock_guard<std::mutex> lock(value_mutex);
-        global_result.store(1);
-        if (global_value) {
-            for (int i = 1; i <= boolCount; i++) {
-                global_value[i] = value[i];
-            }
-        }
-    }
-    
-    destroyClause(cnf);
-}
-
-/**
- * @brief 支持早期停止的DPLL算法
- * @param cnf CNF公式链表
- * @param value 变量赋值数组
- * @return 1表示SAT，0表示UNSAT，-1表示被中断
- */
-int DPLL_WithEarlyStop(SATList*& cnf, int value[]) {
-    // 定期检查是否应该停止
-    static int check_counter = 0;
-    if (++check_counter % 1000 == 0) {  // 每1000次递归检查一次
-        if (solution_found.load()) {
-            return -1;  // 被中断
-        }
-    }
-    
-    // 空子句检测
-    if (emptyClause(cnf)) return 0;
-    
-    // 空CNF检测  
-    if (cnf == nullptr) return 1;
-    
-    // 单子句传播
-    while (unitClause(cnf)) {
-        if (solution_found.load()) return -1;  // 检查中断
-        
-        SATNode* temp = unitClause(cnf);
-        int unit_var = temp->data;
-        
-        // 赋值并传播
-        if (unit_var > 0) {
-            value[unit_var] = 1;
-        } else {
-            value[-unit_var] = 0;
-        }
-        
-        SATList* p = (SATList*)malloc(sizeof(SATList));
-        p->head = (SATNode*)malloc(sizeof(SATNode));
-        p->head->data = unit_var;
-        p->head->next = nullptr;
-        p->next = nullptr;
-        
-        addClause(p, cnf);
-        
-        if (emptyClause(cnf)) return 0;
-    }
-    
-    // 再次检查中断
-    if (solution_found.load()) return -1;
-    
-    // 选择分支变量（使用JEROSLOW-WANG启发式）
-    int* pos_count = (int*)calloc(boolCount + 1, sizeof(int));
-    int* neg_count = (int*)calloc(boolCount + 1, sizeof(int));
-    
-    for (SATList* lp = cnf; lp != nullptr; lp = lp->next) {
-        int clause_size = 0;
-        for (SATNode* np = lp->head; np != nullptr; np = np->next) {
-            clause_size++;
-        }
-        
-        double weight = 1.0 / (1 << clause_size);  // 2^(-clause_size)
-        
-        for (SATNode* np = lp->head; np != nullptr; np = np->next) {
-            if (np->data > 0) {
-                pos_count[np->data] += weight * 100;  // 放大避免浮点运算
-            } else {
-                neg_count[-np->data] += weight * 100;
-            }
-        }
-    }
-    
-    int max_score = 0, branch_var = 1;
-    for (int i = 1; i <= boolCount; i++) {
-        int score = pos_count[i] + neg_count[i];
-        if (score > max_score) {
-            max_score = score;
-            branch_var = i;
-        }
-    }
-    
-    free(pos_count);
-    free(neg_count);
-    
-    // 决定分支顺序（正分支优先，因为通常更容易找到解）
-    bool positive_first = true;
-    
-    // 尝试第一个分支
-    SATList* cnf_copy1 = nullptr;
-    CopyClause(cnf_copy1, cnf);
-    
-    int first_assignment = positive_first ? 1 : 0;
-    value[branch_var] = first_assignment;
-    
-    SATList* branch1 = (SATList*)malloc(sizeof(SATList));
-    branch1->head = (SATNode*)malloc(sizeof(SATNode));
-    branch1->head->data = positive_first ? branch_var : -branch_var;
-    branch1->head->next = nullptr;
-    branch1->next = nullptr;
-    
-    addClause(branch1, cnf_copy1);
-    
-    int result1 = DPLL_WithEarlyStop(cnf_copy1, value);
-    
-    if (result1 == 1) {
-        destroyClause(cnf_copy1);
-        return 1;
-    }
-    
-    if (result1 == -1 || solution_found.load()) {  // 被中断
-        destroyClause(cnf_copy1);
-        return -1;
-    }
-    
-    // 尝试第二个分支
-    SATList* cnf_copy2 = nullptr;
-    CopyClause(cnf_copy2, cnf);
-    
-    int second_assignment = positive_first ? 0 : 1;
-    value[branch_var] = second_assignment;
-    
-    SATList* branch2 = (SATList*)malloc(sizeof(SATList));
-    branch2->head = (SATNode*)malloc(sizeof(SATNode));
-    branch2->head->data = positive_first ? -branch_var : branch_var;
-    branch2->head->next = nullptr;
-    branch2->next = nullptr;
-    
-    addClause(branch2, cnf_copy2);
-    
-    int result2 = DPLL_WithEarlyStop(cnf_copy2, value);
-    
-    destroyClause(cnf_copy1);
-    destroyClause(cnf_copy2);
-    
-    return result2;
-}
-
-/**
- * @brief DPLL算法智能双核优化版本实现
- * @details 采用抢占式并行策略：
- *          - 线程1优先搜索正分支
- *          - 线程2延迟启动搜索负分支，支持抢占
- *          - 避免重复工作，提高效率
- */
-int DPLL_DualCore(SATList*& cnf, int value[]) {
-    if (cnf == nullptr) return 0;
-    if (emptyClause(cnf)) return 0;
-    
-    // 重置全局状态
-    solution_found.store(false);
-    thread1_started.store(false);
-    thread1_finished.store(false);
-    global_result.store(0);
-    global_value = value;
-    
-    // 找到第一个要分支的变量（选择出现次数最多的变量）
-    int* count = (int*)calloc(2 * boolCount + 2, sizeof(int));
-    
-    // 统计文字出现次数
-    for (SATList* lp = cnf; lp != nullptr; lp = lp->next) {
-        for (SATNode* dp = lp->head; dp != nullptr; dp = dp->next) {
-            if (dp->data > 0 && dp->data <= boolCount) {
-                count[dp->data]++;
-            }
-            else if (dp->data < 0 && -dp->data <= boolCount) {
-                count[boolCount - dp->data]++;
-            }
-        }
-    }
-    
-    // 找出现次数最多的变量
-    int max = 0, first_var = 1;
-    for (int i = 1; i <= boolCount; i++) {
-        if (count[i] > max) {
-            max = count[i];
-            first_var = i;
-        }
-    }
-    
-    free(count);
-    
-    // 创建两个CNF副本
-    SATList* cnf1 = nullptr;
-    SATList* cnf2 = nullptr;
-    CopyClause(cnf1, cnf);
-    CopyClause(cnf2, cnf);
-    
-    // 创建两个变量赋值数组副本
-    int* value1 = (int*)malloc(sizeof(int) * (boolCount + 1));
-    int* value2 = (int*)malloc(sizeof(int) * (boolCount + 1));
-    
-    for (int i = 1; i <= boolCount; i++) {
-        value1[i] = value[i];
-        value2[i] = value[i];
-    }
-    
-    // 启动两个线程 - 使用优化的并行策略
-    // 线程1：优先搜索正分支
-    // 线程2：延迟启动搜索负分支，支持抢占
-    std::thread thread1(dpll_thread_func_optimized, cnf1, value1, first_var, 1, 1);
-    std::thread thread2(dpll_thread_func_optimized, cnf2, value2, first_var, 0, 2);
-    
-    // 等待线程完成
-    thread1.join();
-    thread2.join();
-    
-    // 清理内存
-    free(value1);
-    free(value2);
-    global_value = nullptr;
-    
-    return global_result.load();
-}
-
 // ==================== 高效双核并行实现 ====================
 
 /**
@@ -798,8 +505,6 @@ void FastCNF::fromSATList(SATList* cnf) {
     
     // 初始化状态数组
     clause_satisfied.resize(clauses.size(), false);
-    clause_watch_count.resize(clauses.size(), 0);
-    updateClauseStatus();
 }
 
 /**
@@ -850,7 +555,6 @@ FastCNF FastCNF::copy() const {
     result.assignment = assignment;
     result.trail = trail;
     result.clause_satisfied = clause_satisfied;
-    result.clause_watch_count = clause_watch_count;
     result.decision_level = decision_level;
     return result;
 }
@@ -860,9 +564,23 @@ FastCNF FastCNF::copy() const {
  */
 bool FastCNF::hasEmptyClause() const {
     for (size_t i = 0; i < clauses.size(); ++i) {
-        if (!clause_satisfied[i] && clause_watch_count[i] == 0) {
-            return true;
+        if (clause_satisfied[i]) continue;
+        
+        bool all_false = true;
+        for (int literal : clauses[i]) {
+            int var = abs(literal);
+            VarState val = assignment[var];
+            if (val == VAR_UNASSIGNED) {
+                all_false = false;
+                break;
+            }
+            bool lit_true = (literal > 0) ? (val == VAR_TRUE) : (val == VAR_FALSE);
+            if (lit_true) {
+                all_false = false;
+                break;
+            }
         }
+        if (all_false) return true;
     }
     return false;
 }
@@ -878,72 +596,55 @@ bool FastCNF::allClausesSatisfied() const {
 }
 
 /**
- * @brief 更新子句状态（缓存友好的批量操作）
- */
-void FastCNF::updateClauseStatus() {
-    for (size_t i = 0; i < clauses.size(); ++i) {
-        if (clause_satisfied[i]) continue;
-        
-        int unassigned_count = 0;
-        bool satisfied = false;
-        
-        for (int literal : clauses[i]) {
-            int var = abs(literal);
-            VarState var_value = assignment[var];
-            
-            if (var_value == VAR_UNASSIGNED) {
-                unassigned_count++;
-            } else {
-                bool literal_true = (literal > 0) ? (var_value == VAR_TRUE) : (var_value == VAR_FALSE);
-                if (literal_true) {
-                    satisfied = true;
-                    break;
-                }
-            }
-        }
-        
-        clause_satisfied[i] = satisfied;
-        clause_watch_count[i] = satisfied ? 0 : unassigned_count;
-    }
-}
-
-/**
  * @brief 高效单子句传播
  */
 bool FastCNF::unitPropagate() {
-    bool propagated = false;
-    
-    do {
-        propagated = false;
-        updateClauseStatus();
+    bool changed = true;
+    while (changed && !hasEmptyClause()) {
+        changed = false;
         
-        // 查找单子句
         for (size_t i = 0; i < clauses.size(); ++i) {
-            if (clause_satisfied[i] || clause_watch_count[i] != 1) continue;
+            if (clause_satisfied[i]) continue;
             
-            // 找到未赋值的文字
-            int unit_literal = 0;
+            int unassigned_count = 0;
+            int unassigned_literal = 0;
+            
             for (int literal : clauses[i]) {
                 int var = abs(literal);
-                if (assignment[var] == VAR_UNASSIGNED) {
-                    unit_literal = literal;
-                    break;
+                VarState val = assignment[var];
+                
+                if (val == VAR_UNASSIGNED) {
+                    unassigned_count++;
+                    unassigned_literal = literal;
+                } else {
+                    bool lit_true = (literal > 0) ? (val == VAR_TRUE) : (val == VAR_FALSE);
+                    if (lit_true) {
+                        clause_satisfied[i] = true;
+                        changed = true;
+                        goto next_clause;
+                    }
                 }
             }
             
-            if (unit_literal != 0) {
-                int var = abs(unit_literal);
-                VarState value = (unit_literal > 0) ? VAR_TRUE : VAR_FALSE;
-                assign(var, value, false);
-                propagated = true;
-                
-                // 检查冲突
-                if (hasEmptyClause()) {
-                    return false;
-                }
+            // 如果没有未赋值文字，且没满足 → 空子句
+            if (unassigned_count == 0) {
+                return false;  // 冲突
             }
+            
+            // 如果只有一个未赋值文字 → 单子句
+            if (unassigned_count == 1) {
+                int var = abs(unassigned_literal);
+                VarState val = (unassigned_literal > 0) ? VAR_TRUE : VAR_FALSE;
+                assign(var, val, false);  // 非决策赋值
+                changed = true;
+            }
+            
+        next_clause:;
         }
-    } while (propagated);
+        
+        // 如果传播过程中发现冲突
+        if (hasEmptyClause()) return false;
+    }
     
     return true;
 }
@@ -952,9 +653,14 @@ bool FastCNF::unitPropagate() {
  * @brief 赋值变量并记录到trail
  */
 void FastCNF::assign(int var, VarState value, bool is_decision) {
+    if (assignment[var] != VAR_UNASSIGNED) {
+        // 重复赋值！这是严重错误
+        return;  // 或抛异常
+    }
+    
     TrailItem item;
     item.var = var;
-    item.old_value = assignment[var];
+    item.old_value = assignment[var];  // 当前是 UNASSIGNED
     item.decision_level = decision_level;
     item.is_decision = is_decision;
     
@@ -1014,35 +720,33 @@ int FastCNF::chooseBranchVariable() const {
  * @brief 高效DPLL算法实现
  */
 bool FastDPLL(FastCNF& cnf) {
-    // 单子句传播
     if (!cnf.unitPropagate()) {
         return false;
     }
     
-    // 检查是否已经满足所有子句
     if (cnf.allClausesSatisfied()) {
         return true;
     }
     
-    // 选择分支变量
     int branch_var = cnf.chooseBranchVariable();
-    if (branch_var == 0) {
-        return cnf.allClausesSatisfied();
-    }
+    if (branch_var == 0) return cnf.allClausesSatisfied();
     
-    // 尝试正分支
+    // 保存当前决策层级
+    int current_level = cnf.decision_level;
+    
+    // 分支1：true
     cnf.assign(branch_var, VAR_TRUE, true);
-    if (FastDPLL(cnf)) {
-        return true;
-    }
+    if (FastDPLL(cnf)) return true;
     
-    // 回溯并尝试负分支
-    cnf.backtrack(cnf.decision_level - 1);
+    // 回溯
+    cnf.backtrack(current_level);
+    
+    // 分支2：false
     cnf.assign(branch_var, VAR_FALSE, true);
     bool result = FastDPLL(cnf);
     
     if (!result) {
-        cnf.backtrack(cnf.decision_level - 1);
+        cnf.backtrack(current_level);
     }
     
     return result;

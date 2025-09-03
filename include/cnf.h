@@ -101,29 +101,12 @@ int emptyClause(SATList* cnf);
 SATNode* unitClause(SATList* cnf);
 
 /**
- * @brief 支持早期停止的DPLL算法
- * @param cnf CNF公式链表
- * @param value 变量赋值数组
- * @return 1表示SAT，0表示UNSAT，-1表示被中断
- */
-int DPLL_WithEarlyStop(SATList*& cnf, int value[]);
-
-/**
  * @brief DPLL算法主函数，求解SAT问题
  * @param cnf CNF公式链表
  * @param value 变量赋值数组
  * @return 有解返回1，无解返回0
  */
 int DPLL(SATList*& cnf, int value[]);
-
-/**
- * @brief DPLL算法双核优化版本
- * @param cnf CNF公式链表
- * @param value 变量赋值数组
- * @return 有解返回1，无解返回0
- * @details 使用两个线程分别尝试第一个分支变量的正负赋值，提高求解效率
- */
-int DPLL_DualCore(SATList*& cnf, int value[]);
 
 /**
  * @brief 深拷贝CNF公式链表
@@ -171,7 +154,6 @@ public:
     std::vector<VarState> assignment;           ///< 变量赋值状态
     std::vector<TrailItem> trail;               ///< 回溯栈
     std::vector<bool> clause_satisfied;         ///< 子句是否已满足
-    std::vector<int> clause_watch_count;        ///< 每个子句的未满足文字数
     int num_vars;                               ///< 变量总数
     int decision_level;                         ///< 当前决策层级
     
@@ -223,9 +205,6 @@ public:
      * @brief 选择下一个分支变量
      */
     int chooseBranchVariable() const;
-    
-private:
-    void updateClauseStatus();
 };
 
 /**

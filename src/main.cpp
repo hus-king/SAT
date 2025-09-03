@@ -30,11 +30,10 @@ int main() {
         cout << "              SAT求解器与数独游戏\n";
         cout << "-------------------------------------------------\n";
         cout << "1. 读取CNF文件              2. 显示子句\n";
-        cout << "3. DPLL求解并保存           4. DPLL求解（双核优化）并保存\n";
-        cout << "5. DPLL求解（高效双核）并保存 6. 生成数独\n";
-        cout << "0. 退出\n";
+        cout << "3. DPLL求解并保存           4. DPLL求解（高效双核）并保存\n";
+        cout << "5. 生成数独                 0. 退出\n";
         cout << "-------------------------------------------------\n";
-        cout << "请选择操作 [0~6]: ";
+        cout << "请选择操作 [0~5]: ";
         cin >> op;
 
         switch (op) {
@@ -120,56 +119,6 @@ int main() {
                 cout << "未加载文件!\n";
             }
             else {
-                cout << "使用DPLL算法（双核优化）求解SAT问题...\n";
-                
-                // 分配内存并初始化变量赋值
-                value = (int*)malloc(sizeof(int) * (boolCount + 1));
-                if (value == nullptr) {
-                    cout << "内存分配失败!\n";
-                    break;
-                }
-                
-                for (i = 1; i <= boolCount; i++) value[i] = 1;
-
-                // 计时求解
-                start = clock();
-                result = DPLL_DualCore(CNFList, value);
-                finish = clock();
-                
-                timeElapsed = (double)(finish - start) / CLOCKS_PER_SEC;
-                
-                // 显示结果
-                cout << "\n=== DPLL双核优化求解结果 ===\n";
-                cout << "结果: " << (result ? "SAT" : "UNSAT") << endl;
-                
-                if (result == 1) {
-                    cout << "变量赋值: ";
-                    for (i = 1; i <= boolCount; i++) {
-                        cout << (value[i] == 1 ? i : -i) << " ";
-                    }
-                    cout << "\n";
-                }
-                
-                cout << "双核求解时间: " << timeElapsed * 1000 << " ms\n";
-
-                // 保存结果
-                if (WriteFile(result, timeElapsed, value) == 1) {
-                    cout << "结果已保存到.res文件\n";
-                }
-                else {
-                    cout << "保存结果失败\n";
-                }
-                
-                free(value);
-            }
-            pauseProgram();
-            break;
-
-        case 5:
-            if (CNFList == nullptr) {
-                cout << "未加载文件!\n";
-            }
-            else {
                 cout << "使用高效双核DPLL算法求解SAT问题...\n";
                 cout << "优化特性: 数组结构 + 回溯栈 + 缓存友好 + 智能并行\n";
                 
@@ -216,7 +165,7 @@ int main() {
             pauseProgram();
             break;
 
-        case 6: {
+        case 5: {
             cout << "=== 数独游戏生成器 ===\n";
             
             int full[N][N] = {};
