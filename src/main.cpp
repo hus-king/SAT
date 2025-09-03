@@ -9,6 +9,7 @@
 #include "common.h"
 #include "cnf.h"
 #include "sudoku.h"
+#include "optimize_cnf.h"
 
 // ==================== 主函数 ====================
 int main() {
@@ -30,10 +31,10 @@ int main() {
         cout << "              SAT求解器与数独游戏\n";
         cout << "-------------------------------------------------\n";
         cout << "1. 读取CNF文件              2. 显示子句\n";
-        cout << "3. DPLL求解并保存           4. 生成数独\n";
-        cout << "0. 退出\n";
+        cout << "3. DPLL求解并保存           4. DPLL优化求解并保存\n";
+        cout << "5. 生成数独                 0. 退出\n";
         cout << "-------------------------------------------------\n";
-        cout << "请选择操作 [0~4]: ";
+        cout << "请选择操作 [0~5]: ";
         cin >> op;
 
         switch (op) {
@@ -114,7 +115,58 @@ int main() {
             pauseProgram();
             break;
 
-        case 4: {
+        case 4:
+            if (CNFList == nullptr) {
+                cout << "未加载文件!\n";
+            }
+            else {
+                cout << "使用优化DPLL算法求解SAT问题...\n";
+                cout << "优化特性: MOM启发式 + Jeroslow-Wang + 纯文字消除 + 高效传播\n";
+                
+                // 分配内存并初始化变量赋值
+                value = (int*)malloc(sizeof(int) * (boolCount + 1));
+                if (value == nullptr) {
+                    cout << "内存分配失败!\n";
+                    break;
+                }
+                
+                for (i = 1; i <= boolCount; i++) value[i] = 1;
+
+                // 计时求解
+                start = clock();
+                result = DPLL_Optimized(CNFList, value);
+                finish = clock();
+                
+                timeElapsed = (double)(finish - start) / CLOCKS_PER_SEC;
+                
+                // 显示结果
+                cout << "\n=== 优化DPLL求解结果 ===\n";
+                cout << "结果: " << (result ? "SAT" : "UNSAT") << endl;
+                
+                if (result == 1) {
+                    cout << "变量赋值: ";
+                    for (i = 1; i <= boolCount; i++) {
+                        cout << (value[i] == 1 ? i : -i) << " ";
+                    }
+                    cout << "\n";
+                }
+                
+                cout << "优化求解时间: " << timeElapsed * 1000 << " ms\n";
+
+                // 保存结果
+                if (WriteFile(result, timeElapsed, value) == 1) {
+                    cout << "结果已保存到.res文件\n";
+                }
+                else {
+                    cout << "保存结果失败\n";
+                }
+                
+                free(value);
+            }
+            pauseProgram();
+            break;
+
+        case 5: {
             cout << "=== 数独游戏生成器 ===\n";
             
             int full[N][N] = {};
@@ -213,7 +265,7 @@ int main() {
             break;
             
         default:
-            cout << "无效选项! 请选择0-4.\n";
+            cout << "无效选项! 请选择0-5.\n";
             pauseProgram();
             break;
         }
