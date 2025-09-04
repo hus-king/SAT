@@ -206,12 +206,10 @@ bool OptimizedDPLL::pureLiteralElimination() {
     for (int i = 1; i <= cnf.num_vars; i++) {
         if (!cnf.is_assigned[i]) {
             if (pos_count[i] > 0 && neg_count[i] == 0) {
-                cnf.is_assigned[i] = true;
-                cnf.assignment[i] = true;   // 纯正文字
+                pushAssignment(i, true);   // 纯正文字
                 changed = true;
             } else if (pos_count[i] == 0 && neg_count[i] > 0) {
-                cnf.is_assigned[i] = true;
-                cnf.assignment[i] = false;  // 纯负文字
+                pushAssignment(i, false);  // 纯负文字
                 changed = true;
             }
         }
@@ -290,8 +288,7 @@ bool OptimizedDPLL::unitPropagation() {
                 bool value = (unassigned_literal > 0);
                 
                 if (!cnf.is_assigned[var]) {
-                    cnf.is_assigned[var] = true;
-                    cnf.assignment[var] = value;
+                    pushAssignment(var, value);
                     changed = true;
                     // 立即更新相关子句状态
                     updateClauseStatus();
@@ -355,23 +352,18 @@ bool OptimizedDPLL::dpllRecursive() {
         return cnf.allClausesSatisfied();
     }
     
-    // 分支1：var = true
-    std::vector<bool> backup_assignment = cnf.assignment;
-    std::vector<bool> backup_is_assigned = cnf.is_assigned;
-    std::vector<bool> backup_satisfied = cnf.clause_satisfied;
+    // 记录当前决策层级
+    size_t decision_level = getCurrentLevel();
     
-    cnf.is_assigned[var] = true;
-    cnf.assignment[var] = true;
+    // 分支1：var = true
+    pushAssignment(var, true);
     if (dpllRecursive()) {
         return true;
     }
     
-    // 回溯并尝试分支2：var = false
-    cnf.assignment = backup_assignment;
-    cnf.is_assigned = backup_is_assigned;
-    cnf.clause_satisfied = backup_satisfied;
-    cnf.is_assigned[var] = true;
-    cnf.assignment[var] = false;
+    // 回溯到决策层级，尝试分支2：var = false
+    backtrack(decision_level);
+    pushAssignment(var, false);
     
     return dpllRecursive();
 }
@@ -396,6 +388,39 @@ void OptimizedDPLL::printStats() const {
         if (cnf.is_assigned[i]) assigned_count++;
     }
     std::cout << "已赋值变量数: " << assigned_count << "/" << cnf.num_vars << "\n";
+}
+
+// ==================== 增量回溯实现 ====================
+
+void OptimizedDPLL::pushAssignment(int var, bool value) {
+    // 记录变更前的状态
+    AssignmentChange change;
+    change.var = var;
+    change.was_assigned = cnf.is_assigned[var];
+    change.old_value = cnf.assignment[var];
+    
+    // 将变更记录推入栈
+    undo_stack.push_back(change);
+    
+    // 执行赋值
+    cnf.is_assigned[var] = true;
+    cnf.assignment[var] = value;
+}
+
+void OptimizedDPLL::backtrack(size_t target_level) {
+    // 回溯到指定层级
+    while (undo_stack.size() > target_level) {
+        AssignmentChange change = undo_stack.back();
+        undo_stack.pop_back();
+        
+        // 恢复变量状态
+        cnf.is_assigned[change.var] = change.was_assigned;
+        cnf.assignment[change.var] = change.old_value;
+    }
+    
+    // 重新计算子句状态
+    std::fill(cnf.clause_satisfied.begin(), cnf.clause_satisfied.end(), false);
+    updateClauseStatus();
 }
 
 // ==================== 接口函数实现 ====================

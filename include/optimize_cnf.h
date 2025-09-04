@@ -92,9 +92,19 @@ public:
  */
 class OptimizedDPLL {
 private:
+    /**
+     * @brief 赋值变更记录，用于增量回溯
+     */
+    struct AssignmentChange {
+        int var;                ///< 变更的变量
+        bool old_value;         ///< 原始值
+        bool was_assigned;      ///< 原来是否已赋值
+    };
+    
     OptimizedCNF cnf;
     std::vector<int> pos_count;                 ///< 正文字计数
     std::vector<int> neg_count;                 ///< 负文字计数
+    std::vector<AssignmentChange> undo_stack;   ///< 回溯栈
     
     /**
      * @brief 变量选择启发式（MOM + Jeroslow-Wang）
@@ -125,6 +135,21 @@ private:
      * @brief 计算文字出现频率
      */
     void calculateLiteralCounts();
+    
+    /**
+     * @brief 记录变量赋值变更，用于回溯
+     */
+    void pushAssignment(int var, bool value);
+    
+    /**
+     * @brief 回溯到指定层级
+     */
+    void backtrack(size_t target_level);
+    
+    /**
+     * @brief 获取当前决策层级
+     */
+    size_t getCurrentLevel() const { return undo_stack.size(); }
     
     /**
      * @brief DPLL递归求解
