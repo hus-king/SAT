@@ -114,6 +114,7 @@ private:
     std::vector<int> order_heap;                ///< 按活跃度排序的变量堆
     double activity_inc;                        ///< 活跃度增量
     double decay_factor;                        ///< 衰减因子
+    int decision_count;                         ///< 决策计数器
     
     /**
      * @brief 变量选择启发式（MOM + Jeroslow-Wang）
@@ -164,6 +165,11 @@ private:
      * @brief VSIDS变量选择启发式
      */
     int selectVariableVSIDS();
+    
+    /**
+     * @brief MOM启发式变量选择（Maximum Occurrences in clauses of Minimum size）
+     */
+    int selectVariableMOM();
     
     /**
      * @brief 在冲突时提升相关变量的活跃度

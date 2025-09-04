@@ -131,7 +131,7 @@ void OptimizedCNF::printDebugInfo() const {
 // ==================== OptimizedDPLL类实现 ====================
 
 OptimizedDPLL::OptimizedDPLL(SATList* sat_cnf) 
-    : cnf(boolCount, clauseCount), activity_inc(1.0), decay_factor(0.95) {
+    : cnf(boolCount, clauseCount), activity_inc(1.0), decay_factor(0.95), decision_count(0) {
     cnf.fromSATList(sat_cnf);
     pos_count.resize(boolCount + 1, 0);
     neg_count.resize(boolCount + 1, 0);
@@ -165,54 +165,19 @@ void OptimizedDPLL::calculateLiteralCounts() {
 }
 
 int OptimizedDPLL::selectVariable() {
-    // 优先使用VSIDS启发式
-    int vsids_var = selectVariableVSIDS();
-    if (vsids_var != 0) {
-        return vsids_var;
+    // 求解初期使用MOM启发式（快速），后期使用VSIDS（适应性强）
+    if (decision_count < cnf.num_vars / 4) {
+        // 初期：优先使用MOM启发式
+        int mom_var = selectVariableMOM();
+        if (mom_var != 0) return mom_var;
     }
     
-    // 如果VSIDS没有选出变量，回退到传统启发式
-    calculateLiteralCounts();
+    // 使用VSIDS快速选择
+    int var = selectVariableVSIDS();
+    if (var != 0) return var;
     
-    int best_var = 0;
-    double max_score = -1.0;
-    
-    for (int i = 1; i <= cnf.num_vars; i++) {
-        if (!cnf.is_assigned[i]) {  // 未赋值
-            // Jeroslow-Wang启发式：考虑子句长度权重
-            double score = 0.0;
-            
-            for (size_t j = 0; j < cnf.clauses.size(); ++j) {
-                if (cnf.clause_satisfied[j]) continue;
-                
-                int clause_size = 0;
-                bool contains_var = false;
-                
-                for (int literal : cnf.clauses[j]) {
-                    int var = abs(literal);
-                    if (!cnf.is_assigned[var]) {
-                        clause_size++;
-                        if (var == i) contains_var = true;
-                    }
-                }
-                
-                if (contains_var && clause_size > 0) {
-                    score += 1.0 / (1 << clause_size);  // 2^(-clause_size)
-                }
-            }
-            
-            // 结合MOM启发式和VSIDS活跃度
-            score += (pos_count[i] + neg_count[i]) * 0.1;
-            score += activity[i] * 0.5;  // 加入活跃度权重
-            
-            if (score > max_score) {
-                max_score = score;
-                best_var = i;
-            }
-        }
-    }
-    
-    return best_var;
+    // 备用：MOM启发式（更快速）
+    return selectVariableMOM();
 }
 
 bool OptimizedDPLL::pureLiteralElimination() {
@@ -372,6 +337,9 @@ bool OptimizedDPLL::dpllRecursive() {
         return cnf.allClausesSatisfied();
     }
     
+    // 增加决策计数
+    decision_count++;
+    
     // 记录当前决策层级
     size_t decision_level = getCurrentLevel();
     
@@ -487,6 +455,27 @@ int OptimizedDPLL::selectVariableVSIDS() {
         if (!cnf.is_assigned[i] && activity[i] > max_activity) {
             max_activity = activity[i];
             best_var = i;
+        }
+    }
+    
+    return best_var;
+}
+
+int OptimizedDPLL::selectVariableMOM() {
+    calculateLiteralCounts();
+    
+    int best_var = 0;
+    int max_mom = -1;
+    
+    for (int i = 1; i <= cnf.num_vars; ++i) {
+        if (!cnf.is_assigned[i]) {
+            // MOM启发式：(pos_count * neg_count) + pos_count + neg_count
+            // 优先选择在正负文字出现频率都高的变量
+            int mom_score = pos_count[i] * neg_count[i] + pos_count[i] + neg_count[i];
+            if (mom_score > max_mom) {
+                max_mom = mom_score;
+                best_var = i;
+            }
         }
     }
     
