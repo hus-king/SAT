@@ -14,13 +14,15 @@
 
 OptimizedCNF::OptimizedCNF(int vars, int clauses_count) 
     : num_vars(vars), num_clauses(clauses_count) {
-    assignment.resize(vars + 1, -1);  // -1表示未赋值
+    assignment.resize(vars + 1, false);      // 使用vector<bool>存储
+    is_assigned.resize(vars + 1, false);     // 跟踪是否已赋值
     clause_satisfied.resize(clauses_count, false);
 }
 
 OptimizedCNF::OptimizedCNF(const OptimizedCNF& other) {
     clauses = other.clauses;
     assignment = other.assignment;
+    is_assigned = other.is_assigned;
     clause_satisfied = other.clause_satisfied;
     num_vars = other.num_vars;
     num_clauses = other.num_clauses;
@@ -51,14 +53,13 @@ bool OptimizedCNF::hasEmptyClause() const {
         bool all_false = true;
         for (int literal : clauses[i]) {
             int var = abs(literal);
-            int val = assignment[var];
             
-            if (val == -1) {  // 未赋值
+            if (!is_assigned[var]) {  // 未赋值
                 all_false = false;
                 break;
             }
             
-            bool lit_true = (literal > 0) ? (val == 1) : (val == 0);
+            bool lit_true = (literal > 0) ? assignment[var] : !assignment[var];
             if (lit_true) {
                 all_false = false;
                 break;
@@ -76,10 +77,9 @@ bool OptimizedCNF::allClausesSatisfied() const {
         bool satisfied = false;
         for (int literal : clauses[i]) {
             int var = abs(literal);
-            int val = assignment[var];
             
-            if (val != -1) {  // 已赋值
-                bool lit_true = (literal > 0) ? (val == 1) : (val == 0);
+            if (is_assigned[var]) {  // 已赋值
+                bool lit_true = (literal > 0) ? assignment[var] : !assignment[var];
                 if (lit_true) {
                     satisfied = true;
                     break;
@@ -92,7 +92,7 @@ bool OptimizedCNF::allClausesSatisfied() const {
             int unassigned_count = 0;
             for (int literal : clauses[i]) {
                 int var = abs(literal);
-                if (assignment[var] == -1) {
+                if (!is_assigned[var]) {
                     unassigned_count++;
                 }
             }
@@ -119,7 +119,11 @@ void OptimizedCNF::printDebugInfo() const {
     
     std::cout << "Assignments: ";
     for (size_t i = 1; i < assignment.size(); ++i) {
-        std::cout << "x" << i << "=" << assignment[i] << " ";
+        if (is_assigned[i]) {
+            std::cout << "x" << i << "=" << (assignment[i] ? 1 : 0) << " ";
+        } else {
+            std::cout << "x" << i << "=-1 ";
+        }
     }
     std::cout << std::endl;
 }
@@ -141,7 +145,7 @@ void OptimizedDPLL::calculateLiteralCounts() {
         
         for (int literal : cnf.clauses[i]) {
             int var = abs(literal);
-            if (var <= cnf.num_vars && cnf.assignment[var] == -1) {
+            if (var <= cnf.num_vars && !cnf.is_assigned[var]) {
                 if (literal > 0) {
                     pos_count[var]++;
                 } else {
@@ -159,7 +163,7 @@ int OptimizedDPLL::selectVariable() {
     double max_score = -1.0;
     
     for (int i = 1; i <= cnf.num_vars; i++) {
-        if (cnf.assignment[i] == -1) {  // 未赋值
+        if (!cnf.is_assigned[i]) {  // 未赋值
             // Jeroslow-Wang启发式：考虑子句长度权重
             double score = 0.0;
             
@@ -171,7 +175,7 @@ int OptimizedDPLL::selectVariable() {
                 
                 for (int literal : cnf.clauses[j]) {
                     int var = abs(literal);
-                    if (cnf.assignment[var] == -1) {
+                    if (!cnf.is_assigned[var]) {
                         clause_size++;
                         if (var == i) contains_var = true;
                     }
@@ -200,12 +204,14 @@ bool OptimizedDPLL::pureLiteralElimination() {
     bool changed = false;
     
     for (int i = 1; i <= cnf.num_vars; i++) {
-        if (cnf.assignment[i] == -1) {
+        if (!cnf.is_assigned[i]) {
             if (pos_count[i] > 0 && neg_count[i] == 0) {
-                cnf.assignment[i] = 1;  // 纯正文字
+                cnf.is_assigned[i] = true;
+                cnf.assignment[i] = true;   // 纯正文字
                 changed = true;
             } else if (pos_count[i] == 0 && neg_count[i] > 0) {
-                cnf.assignment[i] = 0;  // 纯负文字
+                cnf.is_assigned[i] = true;
+                cnf.assignment[i] = false;  // 纯负文字
                 changed = true;
             }
         }
@@ -225,10 +231,9 @@ void OptimizedDPLL::updateClauseStatus() {
         // 检查子句是否已满足
         for (int literal : cnf.clauses[i]) {
             int var = abs(literal);
-            int val = cnf.assignment[var];
             
-            if (val != -1) {  // 变量已赋值
-                bool lit_true = (literal > 0) ? (val == 1) : (val == 0);
+            if (cnf.is_assigned[var]) {  // 变量已赋值
+                bool lit_true = (literal > 0) ? cnf.assignment[var] : !cnf.assignment[var];
                 if (lit_true) {
                     cnf.clause_satisfied[i] = true;
                     break;
@@ -255,10 +260,9 @@ bool OptimizedDPLL::unitPropagation() {
             // 检查已赋值的文字
             for (int literal : cnf.clauses[i]) {
                 int var = abs(literal);
-                int val = cnf.assignment[var];
                 
-                if (val != -1) {  // 已赋值
-                    bool lit_true = (literal > 0) ? (val == 1) : (val == 0);
+                if (cnf.is_assigned[var]) {  // 已赋值
+                    bool lit_true = (literal > 0) ? cnf.assignment[var] : !cnf.assignment[var];
                     if (lit_true) {
                         is_satisfied = true;
                         break;
@@ -283,17 +287,18 @@ bool OptimizedDPLL::unitPropagation() {
             // 单子句传播
             if (unassigned_count == 1) {
                 int var = abs(unassigned_literal);
-                int value = (unassigned_literal > 0) ? 1 : 0;
+                bool value = (unassigned_literal > 0);
                 
-                if (cnf.assignment[var] == -1) {
+                if (!cnf.is_assigned[var]) {
+                    cnf.is_assigned[var] = true;
                     cnf.assignment[var] = value;
                     changed = true;
                     // 立即更新相关子句状态
                     updateClauseStatus();
                 } else {
                     // 检查赋值冲突
-                    int current_value = cnf.assignment[var];
-                    int required_value = (unassigned_literal > 0) ? 1 : 0;
+                    bool current_value = cnf.assignment[var];
+                    bool required_value = (unassigned_literal > 0);
                     if (current_value != required_value) {
                         return false;  // 赋值冲突
                     }
@@ -350,19 +355,23 @@ bool OptimizedDPLL::dpllRecursive() {
         return cnf.allClausesSatisfied();
     }
     
-    // 分支1：var = 1
-    std::vector<int> backup_assignment = cnf.assignment;
+    // 分支1：var = true
+    std::vector<bool> backup_assignment = cnf.assignment;
+    std::vector<bool> backup_is_assigned = cnf.is_assigned;
     std::vector<bool> backup_satisfied = cnf.clause_satisfied;
     
-    cnf.assignment[var] = 1;
+    cnf.is_assigned[var] = true;
+    cnf.assignment[var] = true;
     if (dpllRecursive()) {
         return true;
     }
     
-    // 回溯并尝试分支2：var = 0
+    // 回溯并尝试分支2：var = false
     cnf.assignment = backup_assignment;
+    cnf.is_assigned = backup_is_assigned;
     cnf.clause_satisfied = backup_satisfied;
-    cnf.assignment[var] = 0;
+    cnf.is_assigned[var] = true;
+    cnf.assignment[var] = false;
     
     return dpllRecursive();
 }
@@ -384,7 +393,7 @@ void OptimizedDPLL::printStats() const {
     
     int assigned_count = 0;
     for (int i = 1; i <= cnf.num_vars; i++) {
-        if (cnf.assignment[i] != -1) assigned_count++;
+        if (cnf.is_assigned[i]) assigned_count++;
     }
     std::cout << "已赋值变量数: " << assigned_count << "/" << cnf.num_vars << "\n";
 }

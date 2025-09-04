@@ -20,7 +20,8 @@
 class OptimizedCNF {
 private:
     std::vector<std::vector<int>> clauses;      ///< 子句集合
-    std::vector<int> assignment;                ///< 变量赋值：-1未赋值，0为假，1为真
+    std::vector<bool> assignment;               ///< 变量赋值：true为真，false为假
+    std::vector<bool> is_assigned;              ///< 变量是否已赋值：true已赋值，false未赋值
     std::vector<bool> clause_satisfied;         ///< 子句是否已满足
     int num_vars;                               ///< 变量总数
     int num_clauses;                            ///< 子句总数
@@ -46,12 +47,27 @@ public:
     /**
      * @brief 获取变量赋值
      */
-    std::vector<int> getAssignment() const { return assignment; }
+    std::vector<int> getAssignment() const { 
+        std::vector<int> result(num_vars + 1, -1);
+        for (int i = 1; i <= num_vars; i++) {
+            if (is_assigned[i]) {
+                result[i] = assignment[i] ? 1 : 0;
+            }
+        }
+        return result;
+    }
     
     /**
      * @brief 设置变量赋值
      */
-    void setAssignment(int var, int value) { assignment[var] = value; }
+    void setAssignment(int var, int value) { 
+        if (value == -1) {
+            is_assigned[var] = false;
+        } else {
+            is_assigned[var] = true;
+            assignment[var] = (value == 1);
+        }
+    }
     
     /**
      * @brief 获取变量数量
