@@ -206,11 +206,6 @@ private:
     void pushAssignment(int var, bool value);
     
     /**
-     * @brief 记录变量赋值并触发Two-Watched Literals传播
-     */
-    bool pushAssignmentWithPropagation(int var, bool value);
-    
-    /**
      * @brief 回溯到指定层级
      */
     void backtrack(size_t target_level);
@@ -232,6 +227,11 @@ public:
      * @brief 求解SAT问题
      */
     bool solve();
+    
+    /**
+     * @brief 记录变量赋值并触发Two-Watched Literals传播
+     */
+    bool pushAssignmentWithPropagation(int var, bool value);
     
     /**
      * @brief 获取解
