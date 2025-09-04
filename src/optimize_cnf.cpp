@@ -130,10 +130,18 @@ void OptimizedCNF::printDebugInfo() const {
 
 // ==================== OptimizedDPLL类实现 ====================
 
-OptimizedDPLL::OptimizedDPLL(SATList* sat_cnf) : cnf(boolCount, clauseCount) {
+OptimizedDPLL::OptimizedDPLL(SATList* sat_cnf) 
+    : cnf(boolCount, clauseCount), activity_inc(1.0), decay_factor(0.95) {
     cnf.fromSATList(sat_cnf);
     pos_count.resize(boolCount + 1, 0);
     neg_count.resize(boolCount + 1, 0);
+    
+    // 初始化VSIDS相关数据结构
+    activity.resize(boolCount + 1, 0.0);
+    order_heap.reserve(boolCount);
+    
+    // 构建变量到子句的映射
+    buildVarClauseMapping();
 }
 
 void OptimizedDPLL::calculateLiteralCounts() {
@@ -157,6 +165,13 @@ void OptimizedDPLL::calculateLiteralCounts() {
 }
 
 int OptimizedDPLL::selectVariable() {
+    // 优先使用VSIDS启发式
+    int vsids_var = selectVariableVSIDS();
+    if (vsids_var != 0) {
+        return vsids_var;
+    }
+    
+    // 如果VSIDS没有选出变量，回退到传统启发式
     calculateLiteralCounts();
     
     int best_var = 0;
@@ -186,8 +201,9 @@ int OptimizedDPLL::selectVariable() {
                 }
             }
             
-            // 结合MOM启发式：Maximum Occurrences in clauses of Minimum size
+            // 结合MOM启发式和VSIDS活跃度
             score += (pos_count[i] + neg_count[i]) * 0.1;
+            score += activity[i] * 0.5;  // 加入活跃度权重
             
             if (score > max_score) {
                 max_score = score;
@@ -279,6 +295,8 @@ bool OptimizedDPLL::unitPropagation() {
             
             // 检查冲突（所有文字都已赋值但都不满足）
             if (unassigned_count == 0) {
+                // 处理冲突，提升冲突子句中变量的活跃度
+                handleConflict(cnf.clauses[i]);
                 return false;  // 冲突
             }
             
@@ -297,6 +315,8 @@ bool OptimizedDPLL::unitPropagation() {
                     bool current_value = cnf.assignment[var];
                     bool required_value = (unassigned_literal > 0);
                     if (current_value != required_value) {
+                        // 处理冲突，提升相关变量活跃度
+                        handleConflict(cnf.clauses[i]);
                         return false;  // 赋值冲突
                     }
                 }
@@ -421,6 +441,67 @@ void OptimizedDPLL::backtrack(size_t target_level) {
     // 重新计算子句状态
     std::fill(cnf.clause_satisfied.begin(), cnf.clause_satisfied.end(), false);
     updateClauseStatus();
+}
+
+// ==================== 预处理和VSIDS优化实现 ====================
+
+void OptimizedDPLL::buildVarClauseMapping() {
+    var_to_clauses.resize(cnf.num_vars + 1);
+    
+    for (int clause_idx = 0; clause_idx < static_cast<int>(cnf.clauses.size()); ++clause_idx) {
+        for (int literal : cnf.clauses[clause_idx]) {
+            int var = abs(literal);
+            var_to_clauses[var].push_back({clause_idx, literal});
+        }
+    }
+}
+
+void OptimizedDPLL::bumpActivity(int var) {
+    activity[var] += activity_inc;
+    
+    // 防止数值溢出
+    if (activity[var] > 1e100) {
+        // 重新归一化所有活跃度
+        for (int i = 1; i <= cnf.num_vars; ++i) {
+            activity[i] *= 1e-100;
+        }
+        activity_inc *= 1e-100;
+    }
+}
+
+void OptimizedDPLL::decayActivity() {
+    activity_inc /= decay_factor;
+    if (activity_inc > 1e100) {  // 防止溢出
+        for (int i = 1; i <= cnf.num_vars; ++i) {
+            activity[i] *= 1e-100;
+        }
+        activity_inc *= 1e-100;
+    }
+}
+
+int OptimizedDPLL::selectVariableVSIDS() {
+    int best_var = 0;
+    double max_activity = -1.0;
+    
+    for (int i = 1; i <= cnf.num_vars; ++i) {
+        if (!cnf.is_assigned[i] && activity[i] > max_activity) {
+            max_activity = activity[i];
+            best_var = i;
+        }
+    }
+    
+    return best_var;
+}
+
+void OptimizedDPLL::handleConflict(const std::vector<int>& conflict_clause) {
+    // 提升冲突子句中所有变量的活跃度
+    for (int literal : conflict_clause) {
+        int var = abs(literal);
+        bumpActivity(var);
+    }
+    
+    // 定期衰减活跃度
+    decayActivity();
 }
 
 // ==================== 接口函数实现 ====================

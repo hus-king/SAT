@@ -106,6 +106,15 @@ private:
     std::vector<int> neg_count;                 ///< 负文字计数
     std::vector<AssignmentChange> undo_stack;   ///< 回溯栈
     
+    // 预处理优化数据结构
+    std::vector<std::vector<std::pair<int, int>>> var_to_clauses; ///< 变量到子句的映射 {clause_idx, literal}
+    
+    // VSIDS启发式数据结构
+    std::vector<double> activity;               ///< 变量活跃度
+    std::vector<int> order_heap;                ///< 按活跃度排序的变量堆
+    double activity_inc;                        ///< 活跃度增量
+    double decay_factor;                        ///< 衰减因子
+    
     /**
      * @brief 变量选择启发式（MOM + Jeroslow-Wang）
      */
@@ -135,6 +144,31 @@ private:
      * @brief 计算文字出现频率
      */
     void calculateLiteralCounts();
+    
+    /**
+     * @brief 构建变量到子句的映射
+     */
+    void buildVarClauseMapping();
+    
+    /**
+     * @brief 提升变量活跃度
+     */
+    void bumpActivity(int var);
+    
+    /**
+     * @brief 衰减所有变量活跃度
+     */
+    void decayActivity();
+    
+    /**
+     * @brief VSIDS变量选择启发式
+     */
+    int selectVariableVSIDS();
+    
+    /**
+     * @brief 在冲突时提升相关变量的活跃度
+     */
+    void handleConflict(const std::vector<int>& conflict_clause);
     
     /**
      * @brief 记录变量赋值变更，用于回溯
