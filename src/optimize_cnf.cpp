@@ -142,6 +142,9 @@ OptimizedDPLL::OptimizedDPLL(SATList* sat_cnf)
     
     // 构建变量到子句的映射
     buildVarClauseMapping();
+    
+    // 初始化Two-Watched Literals
+    initWatchedLiterals();
 }
 
 void OptimizedDPLL::calculateLiteralCounts() {
@@ -182,25 +185,22 @@ int OptimizedDPLL::selectVariable() {
 
 bool OptimizedDPLL::pureLiteralElimination() {
     calculateLiteralCounts();
-    bool changed = false;
     
     for (int i = 1; i <= cnf.num_vars; i++) {
         if (!cnf.is_assigned[i]) {
             if (pos_count[i] > 0 && neg_count[i] == 0) {
-                pushAssignment(i, true);   // 纯正文字
-                changed = true;
+                if (!pushAssignmentWithPropagation(i, true)) {   // 纯正文字
+                    return false; // 传播失败
+                }
             } else if (pos_count[i] == 0 && neg_count[i] > 0) {
-                pushAssignment(i, false);  // 纯负文字
-                changed = true;
+                if (!pushAssignmentWithPropagation(i, false)) {  // 纯负文字
+                    return false; // 传播失败
+                }
             }
         }
     }
     
-    if (changed) {
-        updateClauseStatus();
-    }
-    
-    return changed;
+    return true;
 }
 
 void OptimizedDPLL::updateClauseStatus() {
@@ -223,73 +223,8 @@ void OptimizedDPLL::updateClauseStatus() {
 }
 
 bool OptimizedDPLL::unitPropagation() {
-    bool changed = true;
-    
-    while (changed) {
-        changed = false;
-        updateClauseStatus();
-        
-        for (size_t i = 0; i < cnf.clauses.size(); ++i) {
-            if (cnf.clause_satisfied[i]) continue;
-            
-            int unassigned_count = 0;
-            int unassigned_literal = 0;
-            bool is_satisfied = false;
-            
-            // 检查已赋值的文字
-            for (int literal : cnf.clauses[i]) {
-                int var = abs(literal);
-                
-                if (cnf.is_assigned[var]) {  // 已赋值
-                    bool lit_true = (literal > 0) ? cnf.assignment[var] : !cnf.assignment[var];
-                    if (lit_true) {
-                        is_satisfied = true;
-                        break;
-                    }
-                } else {  // 未赋值
-                    unassigned_count++;
-                    unassigned_literal = literal;
-                }
-            }
-            
-            // 如果子句已满足，跳过
-            if (is_satisfied) {
-                cnf.clause_satisfied[i] = true;
-                continue;
-            }
-            
-            // 检查冲突（所有文字都已赋值但都不满足）
-            if (unassigned_count == 0) {
-                // 处理冲突，提升冲突子句中变量的活跃度
-                handleConflict(cnf.clauses[i]);
-                return false;  // 冲突
-            }
-            
-            // 单子句传播
-            if (unassigned_count == 1) {
-                int var = abs(unassigned_literal);
-                bool value = (unassigned_literal > 0);
-                
-                if (!cnf.is_assigned[var]) {
-                    pushAssignment(var, value);
-                    changed = true;
-                    // 立即更新相关子句状态
-                    updateClauseStatus();
-                } else {
-                    // 检查赋值冲突
-                    bool current_value = cnf.assignment[var];
-                    bool required_value = (unassigned_literal > 0);
-                    if (current_value != required_value) {
-                        // 处理冲突，提升相关变量活跃度
-                        handleConflict(cnf.clauses[i]);
-                        return false;  // 赋值冲突
-                    }
-                }
-            }
-        }
-    }
-    
-    return true;
+    // 使用Two-Watched Literals的优化版本
+    return true; // 传播已经在pushAssignment中通过propagateWatched处理
 }
 
 bool OptimizedDPLL::dpllRecursive() {
@@ -315,19 +250,21 @@ bool OptimizedDPLL::dpllRecursive() {
     }
     
     // 纯文字消除
-    if (pureLiteralElimination()) {
-        updateClauseStatus();
-        // 重新检查
-        bool all_satisfied_after_pure = true;
-        for (size_t i = 0; i < cnf.clauses.size(); ++i) {
-            if (!cnf.clause_satisfied[i]) {
-                all_satisfied_after_pure = false;
-                break;
-            }
+    if (!pureLiteralElimination()) {
+        return false; // 纯文字消除导致冲突
+    }
+    
+    // 重新检查是否所有子句都满足
+    updateClauseStatus();
+    bool all_satisfied_after_pure = true;
+    for (size_t i = 0; i < cnf.clauses.size(); ++i) {
+        if (!cnf.clause_satisfied[i]) {
+            all_satisfied_after_pure = false;
+            break;
         }
-        if (all_satisfied_after_pure) {
-            return true;
-        }
+    }
+    if (all_satisfied_after_pure) {
+        return true;
     }
     
     // 选择变量进行分支
@@ -344,14 +281,20 @@ bool OptimizedDPLL::dpllRecursive() {
     size_t decision_level = getCurrentLevel();
     
     // 分支1：var = true
-    pushAssignment(var, true);
-    if (dpllRecursive()) {
+    if (!pushAssignmentWithPropagation(var, true)) {
+        // 传播失败，回溯并尝试另一个分支
+        backtrack(decision_level);
+    } else if (dpllRecursive()) {
         return true;
+    } else {
+        // 回溯并尝试分支2：var = false
+        backtrack(decision_level);
     }
     
-    // 回溯到决策层级，尝试分支2：var = false
-    backtrack(decision_level);
-    pushAssignment(var, false);
+    // 分支2：var = false
+    if (!pushAssignmentWithPropagation(var, false)) {
+        return false; // 两个分支都失败
+    }
     
     return dpllRecursive();
 }
@@ -393,6 +336,14 @@ void OptimizedDPLL::pushAssignment(int var, bool value) {
     // 执行赋值
     cnf.is_assigned[var] = true;
     cnf.assignment[var] = value;
+}
+
+bool OptimizedDPLL::pushAssignmentWithPropagation(int var, bool value) {
+    // 执行赋值
+    pushAssignment(var, value);
+    
+    // 触发Two-Watched Literals传播
+    return propagateWatched(var, value);
 }
 
 void OptimizedDPLL::backtrack(size_t target_level) {
@@ -491,6 +442,148 @@ void OptimizedDPLL::handleConflict(const std::vector<int>& conflict_clause) {
     
     // 定期衰减活跃度
     decayActivity();
+}
+
+// ==================== Two-Watched Literals 实现 ====================
+
+int OptimizedDPLL::literalToIndex(int literal) const {
+    // 将文字映射到索引：正文字 x 映射到 x，负文字 -x 映射到 num_vars + x
+    return literal > 0 ? literal : cnf.num_vars + (-literal);
+}
+
+void OptimizedDPLL::initWatchedLiterals() {
+    // 初始化watch列表，大小为 2 * num_vars + 1（索引从1开始）
+    watches.resize(2 * cnf.num_vars + 1);
+    clause_watched.resize(cnf.clauses.size(), {0, 0});
+    
+    for (int i = 0; i < static_cast<int>(cnf.clauses.size()); ++i) {
+        const auto& clause = cnf.clauses[i];
+        if (clause.size() >= 2) {
+            // 选择前两个文字作为watched literals
+            int watch1 = clause[0];
+            int watch2 = clause[1];
+            
+            clause_watched[i] = {watch1, watch2};
+            
+            // 添加到对应的watch列表
+            int idx1 = literalToIndex(watch1);
+            int idx2 = literalToIndex(watch2);
+            
+            watches[idx1].push_back(i);
+            watches[idx2].push_back(i);
+        } else if (clause.size() == 1) {
+            // 单子句特殊处理
+            int watch1 = clause[0];
+            clause_watched[i] = {watch1, 0};
+            
+            int idx1 = literalToIndex(watch1);
+            watches[idx1].push_back(i);
+        }
+    }
+}
+
+bool OptimizedDPLL::updateWatch(int clause_idx, int old_watch_literal) {
+    const auto& clause = cnf.clauses[clause_idx];
+    auto& watched = clause_watched[clause_idx];
+    
+    // 确定另一个watched literal
+    int other_watch = (watched.first == old_watch_literal) ? watched.second : watched.first;
+    
+    // 寻找新的watched literal
+    for (int literal : clause) {
+        if (literal != old_watch_literal && literal != other_watch) {
+            int var_in_lit = abs(literal);
+            
+            // 检查这个文字是否已经满足子句
+            if (cnf.is_assigned[var_in_lit]) {
+                bool var_value = cnf.assignment[var_in_lit];
+                bool lit_value = (literal > 0) ? var_value : !var_value;
+                if (lit_value) {
+                    // 子句已满足
+                    cnf.clause_satisfied[clause_idx] = true;
+                    return true;
+                }
+            } else {
+                // 找到新的未赋值文字作为watched literal
+                if (watched.first == old_watch_literal) {
+                    watched.first = literal;
+                } else {
+                    watched.second = literal;
+                }
+                
+                // 更新watch列表
+                int old_idx = literalToIndex(old_watch_literal);
+                int new_idx = literalToIndex(literal);
+                
+                // 从旧的watch列表中移除
+                auto& old_watch_list = watches[old_idx];
+                old_watch_list.erase(
+                    std::remove(old_watch_list.begin(), old_watch_list.end(), clause_idx),
+                    old_watch_list.end()
+                );
+                
+                // 添加到新的watch列表
+                watches[new_idx].push_back(clause_idx);
+                
+                return true;
+            }
+        }
+    }
+    
+    return false; // 没有找到新的watched literal
+}
+
+bool OptimizedDPLL::propagateWatched(int var, bool value) {
+    // 构造被赋值为false的文字
+    int false_lit = value ? -var : var;
+    int false_idx = literalToIndex(false_lit);
+    
+    // 创建watch列表的副本，因为在迭代过程中可能会修改
+    std::vector<int> watched_clauses = watches[false_idx];
+    
+    for (int clause_idx : watched_clauses) {
+        if (cnf.clause_satisfied[clause_idx]) continue;
+        
+        const auto& clause = cnf.clauses[clause_idx];
+        const auto& watched = clause_watched[clause_idx];
+        
+        // 尝试更新watch
+        if (!updateWatch(clause_idx, false_lit)) {
+            // 无法找到新的watch，检查另一个watched literal
+            int other_watch = (watched.first == false_lit) ? watched.second : watched.first;
+            
+            if (other_watch == 0) {
+                // 单子句冲突
+                handleConflict(clause);
+                return false;
+            }
+            
+            int other_var = abs(other_watch);
+            if (cnf.is_assigned[other_var]) {
+                // 检查是否冲突
+                bool other_value = cnf.assignment[other_var];
+                bool other_sign = other_watch > 0;
+                if ((other_sign && !other_value) || (!other_sign && other_value)) {
+                    // 冲突
+                    handleConflict(clause);
+                    return false;
+                }
+                // 否则子句已满足
+                cnf.clause_satisfied[clause_idx] = true;
+            } else {
+                // 单子句传播
+                bool required_value = other_watch > 0;
+                pushAssignment(other_var, required_value);
+                
+                // 递归传播
+                if (!propagateWatched(other_var, required_value)) {
+                    return false;
+                }
+            }
+        }
+    }
+    
+    return true;
 }
 
 // ==================== 接口函数实现 ====================

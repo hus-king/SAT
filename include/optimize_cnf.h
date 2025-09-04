@@ -116,6 +116,10 @@ private:
     double decay_factor;                        ///< 衰减因子
     int decision_count;                         ///< 决策计数器
     
+    // Two-Watched Literals 数据结构
+    std::vector<std::vector<int>> watches;      ///< 每个文字对应的watched子句列表
+    std::vector<std::pair<int, int>> clause_watched; ///< 每个子句的两个watched文字索引
+    
     /**
      * @brief 变量选择启发式（MOM + Jeroslow-Wang）
      */
@@ -177,9 +181,34 @@ private:
     void handleConflict(const std::vector<int>& conflict_clause);
     
     /**
+     * @brief 初始化Two-Watched Literals数据结构
+     */
+    void initWatchedLiterals();
+    
+    /**
+     * @brief 文字到索引的映射（处理正负文字）
+     */
+    int literalToIndex(int literal) const;
+    
+    /**
+     * @brief 基于Two-Watched Literals的传播
+     */
+    bool propagateWatched(int var, bool value);
+    
+    /**
+     * @brief 更新某个子句的watched literal
+     */
+    bool updateWatch(int clause_idx, int old_watch_literal);
+    
+    /**
      * @brief 记录变量赋值变更，用于回溯
      */
     void pushAssignment(int var, bool value);
+    
+    /**
+     * @brief 记录变量赋值并触发Two-Watched Literals传播
+     */
+    bool pushAssignmentWithPropagation(int var, bool value);
     
     /**
      * @brief 回溯到指定层级
