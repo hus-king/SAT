@@ -8,118 +8,86 @@
 
 #include "dualcore_cnf.h"
 
-// ==================== DualCoreSolver类实现 ====================
-
-DualCoreSolver::DualCoreSolver(SATList* cnf) : original_cnf(cnf) {}
-
-bool DualCoreSolver::solve(int split_var, int value[]) {
-    // 重置解发现标志
-    solution_found.store(false);
-    
-    // 启动两个线程分别计算 var=true 和 var=false
-    auto future_true = std::async(std::launch::async, [&]() {
-        return solveBranch(split_var, true);
-    });
-    
-    auto future_false = std::async(std::launch::async, [&]() {
-        return solveBranch(split_var, false);
-    });
-    
-    // 等待结果 - 谁先完成谁赢
-    bool result_true = future_true.get();
-    bool result_false = future_false.get();
-    
-    // 如果true分支找到解
-    if (result_true) {
-        // 从true分支获取解
-        OptimizedDPLL solver_true(original_cnf);
-        if (solver_true.pushAssignmentWithPropagation(split_var, true)) {
-            if (solver_true.solve()) {
-                auto solution = solver_true.getSolution();
-                copySolution(solution, value);
-                return true;
-            }
-        }
-    }
-    
-    // 如果false分支找到解
-    if (result_false) {
-        // 从false分支获取解
-        OptimizedDPLL solver_false(original_cnf);
-        if (solver_false.pushAssignmentWithPropagation(split_var, false)) {
-            if (solver_false.solve()) {
-                auto solution = solver_false.getSolution();
-                copySolution(solution, value);
-                return true;
-            }
-        }
-    }
-    
-    return false;  // 都没找到解
-}
-
-bool DualCoreSolver::solveBranch(int var, bool assignment) {
-    try {
-        // 为每个分支创建独立的求解器
-        OptimizedDPLL solver(original_cnf);
-        
-        // 设置初始赋值
-        if (!solver.pushAssignmentWithPropagation(var, assignment)) {
-            return false;  // 初始就冲突
-        }
-        
-        bool result = solver.solve();  // 继续求解
-        
-        // 如果找到解，设置全局标志
-        if (result) {
-            solution_found.store(true);
-        }
-        
-        return result;
-    } catch (...) {
-        return false;
-    }
-}
-
-void DualCoreSolver::copySolution(const std::vector<int>& solution, int value[]) {
-    for (int i = 1; i <= boolCount && i < (int)solution.size(); ++i) {
-        value[i] = solution[i];
-    }
-}
-
 // ==================== 全局函数实现 ====================
 
 int DPLL_DualCore(SATList*& cnf, int value[]) {
     if (cnf == nullptr) return 0;
     
-    // 选择最优分支变量
+    // 选择第一个未赋值变量（简单快速）
     int split_var = selectBestSplitVariable(cnf);
     
     if (split_var == -1) {
-        // 所有变量都已赋值，检查是否满足
-        SATList* lp;
-        SATNode* tp;
-        
-        for (lp = cnf; lp != nullptr; lp = lp->next) {
-            bool clause_satisfied = false;
-            for (tp = lp->head; tp != nullptr; tp = tp->next) {
-                int var = abs(tp->data);
-                if ((tp->data > 0 && value[var] == 1) || 
-                    (tp->data < 0 && value[var] == 0)) {
-                    clause_satisfied = true;
-                    break;
-                }
-            }
-            if (!clause_satisfied) {
-                return 0;  // 有子句不满足
-            }
-        }
-        return 1;  // 所有子句都满足
+        // 所有变量已赋值，直接检查
+        OptimizedDPLL temp_solver(cnf);
+        return temp_solver.solve() ? 1 : 0;
     }
     
-    // 启动双核求解
-    DualCoreSolver dual_solver(cnf);
-    return dual_solver.solve(split_var, value) ? 1 : 0;
+    // 使用 std::promise 实现真正的并行竞争
+    std::promise<std::vector<int>> promise_true, promise_false;
+    std::future<std::vector<int>> future_true = promise_true.get_future();
+    std::future<std::vector<int>> future_false = promise_false.get_future();
+    
+    std::atomic<bool> solution_found{false};
+    
+    // 分支1: var = true
+    std::thread thread_true([&](std::promise<std::vector<int>>&& prom) {
+        if (!solution_found.load()) {
+            OptimizedDPLL solver(cnf);
+            if (solver.pushAssignmentWithPropagation(split_var, true) && 
+                solver.solve() && !solution_found.exchange(true)) {
+                prom.set_value(solver.getSolution());
+            } else {
+                prom.set_value({});
+            }
+        }
+    }, std::move(promise_true));
+    
+    // 分支2: var = false
+    std::thread thread_false([&](std::promise<std::vector<int>>&& prom) {
+        if (!solution_found.load()) {
+            OptimizedDPLL solver(cnf);
+            if (solver.pushAssignmentWithPropagation(split_var, false) && 
+                solver.solve() && !solution_found.exchange(true)) {
+                prom.set_value(solver.getSolution());
+            } else {
+                prom.set_value({});
+            }
+        }
+    }, std::move(promise_false));
+    
+    // 等待第一个完成的结果
+    std::vector<int> result;
+    if (future_true.wait_for(std::chrono::milliseconds(5000)) == std::future_status::ready) {
+        result = future_true.get();
+        if (!result.empty()) {
+            thread_false.detach();  // 直接分离，让其自行结束
+            thread_true.join();
+            // 复制结果
+            for (int i = 1; i <= boolCount && i < (int)result.size(); ++i) {
+                value[i] = result[i];
+            }
+            return 1;
+        }
+    }
+    
+    if (future_false.wait_for(std::chrono::milliseconds(1)) == std::future_status::ready) {
+        result = future_false.get();
+        if (!result.empty()) {
+            thread_true.detach();
+            thread_false.join();
+            // 复制结果
+            for (int i = 1; i <= boolCount && i < (int)result.size(); ++i) {
+                value[i] = result[i];
+            }
+            return 1;
+        }
+    }
+    
+    // 等待所有线程完成
+    thread_true.join();
+    thread_false.join();
+    
+    return 0;
 }
 
 int selectBestSplitVariable(SATList* cnf) {
