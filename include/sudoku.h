@@ -66,6 +66,14 @@ int varIndex(int row, int col, int num);
 void setSudokuGlobals();
 
 /**
+ * @brief 保存数独CNF公式到DIMACS格式文件
+ * @param cnf CNF公式链表
+ * @param filename 输出文件名
+ * @return 成功返回true，失败返回false
+ */
+bool saveSudokuCNF(SATList* cnf, const char* filename);
+
+/**
  * @brief 将数独谜题转换为CNF公式
  * @param puzzle 数独谜题
  * @param cnf 输出的CNF公式（输出参数）
