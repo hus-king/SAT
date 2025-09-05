@@ -150,10 +150,13 @@ void generatePuzzle(int full[N][N], int puzzle[N][N], int toRemove) {
 		SATList* cnf1 = nullptr;
 		sudokuToCNF(puzzle, cnf1);
 
+		// 设置数独求解的全局变量
+		setSudokuGlobals();
+
 		int* value1 = (int*)malloc(sizeof(int) * MAX_VAR);
 		for (int k = 0; k < MAX_VAR; k++) value1[k] = 1;
 
-		int result1 = DPLL(cnf1, value1);
+		int result1 = DPLL_Optimized(cnf1, value1);
 		destroyClause(cnf1);
 
 		if (result1 != 1) {
@@ -193,10 +196,13 @@ void generatePuzzle(int full[N][N], int puzzle[N][N], int toRemove) {
 			negClause->head = negHead;
 			addClause(negClause, cnf2);
 
+			// 设置数独求解的全局变量
+			setSudokuGlobals();
+
 			int* value2 = (int*)malloc(sizeof(int) * MAX_VAR);
 			for (int k = 0; k < MAX_VAR; k++) value2[k] = 1;
 
-			int result2 = DPLL(cnf2, value2);
+			int result2 = DPLL_Optimized(cnf2, value2);
 			free(value2);
 
 			if (result2 == 1) {
@@ -241,6 +247,22 @@ void printSudoku(int grid[N][N]) {
 
 int varIndex(int row, int col, int num) {
 	return row * 81 + col * 9 + num; // 1~729
+}
+
+// 设置数独求解的全局变量
+void setSudokuGlobals() {
+    extern int boolCount, clauseCount;
+    boolCount = 729;  // 9x9x9 = 729 variables for sudoku
+    
+    // 计算数独CNF的大概子句数量
+    // 每格约束: 81*9 + 81*36 = 729 + 2916 = 3645
+    // 行约束: 9*9*9 + 9*9*36 = 729 + 2916 = 3645
+    // 列约束: 9*9*9 + 9*9*36 = 729 + 2916 = 3645
+    // 宫约束: 9*9*9 + 9*9*36 = 729 + 2916 = 3645
+    // 对角线约束: 9*36 = 324
+    // 窗口约束: 2*9*36 = 648
+    // 提示数字: 最多81
+    clauseCount = 15000; // 估算值，足够大
 }
 
 void sudokuToCNF(int puzzle[N][N], SATList*& cnf) {
@@ -419,6 +441,9 @@ int countSolutions(int puzzle[N][N], int maxSolutions) {
     SATList* cnf = nullptr;
     sudokuToCNF(puzzle, cnf);
 
+    // 设置数独求解的全局变量
+    setSudokuGlobals();
+
     int solutionCount = 0;
 
     // 手写栈实现，避免递归栈溢出
@@ -442,8 +467,11 @@ int countSolutions(int puzzle[N][N], int maxSolutions) {
         int* currentValue = valueStack[stackTop];
         stackTop--;
 
-        // 使用DPLL算法求解当前CNF
-        int result = DPLL(currentCNF, currentValue);
+        // 设置数独求解的全局变量
+        setSudokuGlobals();
+
+        // 使用OptimizedDPLL算法求解当前CNF
+        int result = DPLL_Optimized(currentCNF, currentValue);
 
         if (result == 1) {
             // 找到一个解

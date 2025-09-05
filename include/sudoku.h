@@ -10,6 +10,7 @@
 #define SUDOKU_H
 
 #include "cnf.h"
+#include "optimize_cnf.h"
 
 // ==================== 数独相关函数 ====================
 
@@ -58,6 +59,11 @@ void printSudoku(int grid[N][N]);
  * @return SAT变量索引
  */
 int varIndex(int row, int col, int num);
+
+/**
+ * @brief 设置数独求解的全局变量（boolCount和clauseCount）
+ */
+void setSudokuGlobals();
 
 /**
  * @brief 将数独谜题转换为CNF公式
