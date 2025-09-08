@@ -183,11 +183,12 @@ int main() {
         cout << "╔═══════════════════════════════════════════════════════════╗\n";
         cout << "║                  🧠 SAT求解器与数独游戏 🎯                ║\n";
         cout << "╠═══════════════════════════════════════════════════════════╣\n";
-        cout << "║  📁 1. 读取CNF文件              🔧 2. DPLL求解并保存      ║\n";
-        cout << "║  ⚡ 3. DPLL优化求解并保存       🚀 4. DPLL双核优化        ║\n";
-        cout << "║  🎮 5. 生成数独                 🚪 0. 退出                ║\n";
+        cout << "║  📁 1. 读取CNF文件              🔢 2. 遍历输出读到的语句  ║\n";
+        cout << "║  🔧 3. DPLL求解并保存           ⚡ 4. DPLL优化求解并保存  ║\n";
+        cout << "║  🚀 5. DPLL双核优化             🎮 6. 生成数独            ║\n";
+        cout << "║  🚪 0. 退出                                               ║\n";
         cout << "╚═══════════════════════════════════════════════════════════╝\n";
-        cout << "请选择操作 [0~5]: ";
+        cout << "请选择操作 [0~6]: ";
         cin >> op;
 
         switch (op) {
@@ -216,25 +217,145 @@ int main() {
             strncpy(fileName, fullPath.c_str(), sizeof(fileName) - 1);
             fileName[sizeof(fileName) - 1] = '\0';
             
+            cout << "\n╔═══════════════════════════════════════════╗\n";
+            cout << "║             📖 正在读取文件               ║\n";
+            cout << "╚═══════════════════════════════════════════╝\n";
             cout << "选择的文件: " << selectedFile << "\n";
             cout << "完整路径: " << fullPath << "\n";
+            cout << "🔄 正在解析CNF格式...\n";
             
             if (ReadFile(CNFList)) {
-                cout << "文件加载成功!\n";
-                cout << "变量数: " << boolCount << "\n";
-                cout << "子句数: ";
+                // 计算实际子句数
                 int clauseCount = 0;
                 for (SATList* lp = CNFList; lp != nullptr; lp = lp->next) {
                     clauseCount++;
                 }
-                cout << clauseCount << "\n";
+                
+                cout << "\n╔═══════════════════════════════════════════╗\n";
+                cout << "║             📊 文件解析结果               ║\n";
+                cout << "╠═══════════════════════════════════════════╣\n";
+                
+                // 变量数行
+                std::string varText = "变量数: " + std::to_string(boolCount);
+                int varPadding = 44 - varText.length();
+                cout << "║ " << varText << std::string(max(0, varPadding), ' ') << " ║\n";
+                
+                // 子句数行
+                std::string clauseText = "子句数: " + std::to_string(clauseCount);
+                int clausePadding = 44 - clauseText.length();
+                cout << "║ " << clauseText << std::string(max(0, clausePadding), ' ') << " ║\n";
+                
+                cout << "╠═══════════════════════════════════════════╣\n";
+                
+                // CNF合法性检查
+                bool isValid = true;
+                std::string validationResult = "";
+                
+                if (boolCount <= 0) {
+                    isValid = false;
+                    validationResult = "❌ 错误: 变量数必须大于0";
+                } else if (clauseCount <= 0) {
+                    isValid = false;
+                    validationResult = "❌ 错误: 子句数必须大于0";
+                } else if (CNFList == nullptr) {
+                    isValid = false;
+                    validationResult = "❌ 错误: CNF子句列表为空";
+                } else {
+                    // 检查子句是否有效（至少包含一个文字）
+                    bool hasEmptyClause = false;
+                    for (SATList* lp = CNFList; lp != nullptr; lp = lp->next) {
+                        if (lp->head == nullptr) {
+                            hasEmptyClause = true;
+                            break;
+                        }
+                    }
+                    
+                    if (hasEmptyClause) {
+                        isValid = false;
+                        validationResult = "❌ 错误: 发现空子句";
+                    } else {
+                        validationResult = "✅ CNF格式验证通过";
+                    }
+                }
+                
+                // 显示验证结果
+                int validationPadding = 48 - validationResult.length() + (isValid ? 0 : 4); // emoji补偿
+                cout << "║ " << validationResult << std::string(max(0, validationPadding), ' ') << " ║\n";
+                cout << "╚═══════════════════════════════════════════╝\n";
+                
+                if (!isValid) {
+                    cout << "\n⚠️  CNF文件格式不合法，无法进行SAT求解!\n";
+                    cout << "请检查文件格式是否符合DIMACS标准。\n";
+                    // 清理无效的CNF数据
+                    destroyClause(CNFList);
+                    CNFList = nullptr;
+                }
+                
             } else {
-                cout << "文件加载失败!\n";
+                cout << "\n╔═══════════════════════════════════════════╗\n";
+                cout << "║             ❌ 文件读取失败               ║\n";
+                cout << "╠═══════════════════════════════════════════╣\n";
+                cout << "║ 可能的原因:                               ║\n";
+                cout << "║ • 文件不存在或无法访问                    ║\n";
+                cout << "║ • 文件格式不符合DIMACS标准                ║\n";
+                cout << "║ • 文件内容损坏或为空                      ║\n";
+                cout << "╚═══════════════════════════════════════════╝\n";
             }
             pauseProgram();
         } break;
 
-        case 2:
+        case 2: {
+            if (CNFList == nullptr) {
+                cout << "❌ 未加载文件!\n";
+            }
+            else {
+                cout << "\n╔═══════════════════════════════════════════╗\n";
+                cout << "║         📄 遍历输出CNF子句内容            ║\n";
+                cout << "╚═══════════════════════════════════════════╝\n";
+                
+                // 计算子句数
+                int clauseCount = 0;
+                for (SATList* lp = CNFList; lp != nullptr; lp = lp->next) {
+                    clauseCount++;
+                }
+                
+                cout << "\n变量数: " << boolCount << "\n";
+                cout << "子句数: " << clauseCount << "\n";
+                cout << "\n╔═══════════════════════════════════════════╗\n";
+                cout << "║               📋 子句详细内容             ║\n";
+                cout << "╠═══════════════════════════════════════════╣\n";
+                
+                int currentClause = 1;
+                for (SATList* lp = CNFList; lp != nullptr; lp = lp->next) {
+                    cout << "║ 子句 " << std::setw(3) << currentClause << ": ";
+                    
+                    std::string clauseStr = "";
+                    for (SATNode* np = lp->head; np != nullptr; np = np->next) {
+                        clauseStr += std::to_string(np->data);
+                        if (np->next != nullptr) {
+                            clauseStr += " ";
+                        }
+                    }
+                    clauseStr += " 0"; // DIMACS格式以0结尾
+                    
+                    // 控制显示长度，如果太长则截断
+                    if (clauseStr.length() > 30) {
+                        clauseStr = clauseStr.substr(0, 27) + "...";
+                    }
+                    
+                    int padding = 30 - clauseStr.length();
+                    cout << clauseStr << std::string(max(0, padding), ' ') << " ║\n";
+                    
+                    currentClause++;
+                }
+                
+                cout << "╚═══════════════════════════════════════════╝\n";
+                cout << "\n✅ 子句遍历完成! 共显示了 " << clauseCount << " 个子句。\n";
+            }
+            pauseProgram();
+        } break;
+
+        case 3: {
             if (CNFList == nullptr) {
                 cout << "❌ 未加载文件!\n";
             }
@@ -303,9 +424,9 @@ int main() {
                 free(value);
             }
             pauseProgram();
-            break;
+        } break;
 
-        case 3:
+        case 4: {
             if (CNFList == nullptr) {
                 cout << "❌ 未加载文件!\n";
             }
@@ -395,9 +516,9 @@ int main() {
                 free(value);
             }
             pauseProgram();
-            break;
+        } break;
 
-        case 4:
+        case 5: {
             if (CNFList == nullptr) {
                 cout << "❌ 未加载文件!\n";
             }
@@ -465,9 +586,9 @@ int main() {
                 free(value);
             }
             pauseProgram();
-            break;
+        } break;
 
-        case 5: {
+        case 6: {
             cout << "\n╔═══════════════════════════════════════════╗\n";
             cout << "║           🎮 数独游戏生成器               ║\n";
             cout << "╚═══════════════════════════════════════════╝\n";
@@ -530,29 +651,92 @@ int main() {
                     }
                 }
                 
-                cout << "是否直接查看答案? (y/n): ";
-                char choice;
-                cin >> choice;
-                
-                if (choice == 'n' || choice == 'N') {
-                    cout << "请输入你的解答 (9x9个数字):\n";
-                    int ans[9][9];
-                    for (int i = 0; i < 9; i++) {
-                        for (int j = 0; j < 9; j++) {
-                            cin >> ans[i][j];
-                        }
-                    }
-                    
-                    if (check(solved, ans)) {
-                        cout << "答案正确! 棒极了! (*´◡`*)\n";
-                    }
-                    else {
-                        cout << "答案错误! (┬┬﹏┬┬)\n";
+                // 创建用户操作的副本
+                int userPuzzle[N][N];
+                for (int i = 0; i < N; i++) {
+                    for (int j = 0; j < N; j++) {
+                        userPuzzle[i][j] = puzzle[i][j];
                     }
                 }
                 
-                cout << "\n数独答案:\n";
-                printSudoku(solved);
+                cout << "\n╔═══════════════════════════════════════════╗\n";
+                cout << "║              🎮 交互式数独填空            ║\n";
+                cout << "╠═══════════════════════════════════════════╣\n";
+                cout << "║ 📝 输入格式: x y value                    ║\n";
+                cout << "║ 📍 坐标范围: x,y ∈ [1,9]                  ║\n";
+                cout << "║ 🔢 数值范围: value ∈ [1,9]                ║\n";
+                cout << "║ 🚪 输入 0 0 0 退出游戏                    ║\n";
+                cout << "║ 💡 输入 -1 -1 -1 查看答案                 ║\n";
+                cout << "╚═══════════════════════════════════════════╝\n";
+                
+                while (true) {
+                    cout << "\n当前数独状态:\n";
+                    printSudoku(userPuzzle);
+                    
+                    cout << "\n请输入坐标和数值 (x y value): ";
+                    int x, y, value;
+                    cin >> x >> y >> value;
+                    
+                    // 退出游戏
+                    if (x == 0 && y == 0 && value == 0) {
+                        cout << "🚪 游戏结束!\n";
+                        break;
+                    }
+                    
+                    // 查看答案
+                    if (x == -1 && y == -1 && value == -1) {
+                        cout << "\n🔍 数独答案:\n";
+                        printSudoku(solved);
+                        continue;
+                    }
+                    
+                    // 验证输入
+                    if (x < 1 || x > 9 || y < 1 || y > 9) {
+                        cout << "❌ 坐标超出范围! 请输入1-9之间的坐标。\n";
+                        continue;
+                    }
+                    
+                    if (value < 1 || value > 9) {
+                        cout << "❌ 数值超出范围! 请输入1-9之间的数字。\n";
+                        continue;
+                    }
+                    
+                    // 转换为0基索引
+                    int row = x - 1;
+                    int col = y - 1;
+                    
+                    // 检查是否是固定的数字
+                    if (puzzle[row][col] != 0) {
+                        cout << "❌ 位置 (" << x << "," << y << ") 是题目给定的数字，不能修改!\n";
+                        continue;
+                    }
+                    
+                    // 填入数字
+                    userPuzzle[row][col] = value;
+                    cout << "✅ 已在位置 (" << x << "," << y << ") 填入数字 " << value << "\n";
+                    
+                    // 检查是否完成
+                    bool isComplete = true;
+                    for (int i = 0; i < N && isComplete; i++) {
+                        for (int j = 0; j < N && isComplete; j++) {
+                            if (userPuzzle[i][j] == 0) {
+                                isComplete = false;
+                            }
+                        }
+                    }
+                    
+                    if (isComplete) {
+                        cout << "\n🎉 数独填写完成! 正在验证答案...\n";
+                        if (check(solved, userPuzzle)) {
+                            cout << "🏆 恭喜你! 答案完全正确! 🎊\n";
+                            cout << "🌟 你成功解决了这个数独谜题! 🌟\n";
+                        } else {
+                            cout << "💔 很遗憾，答案不正确。请检查后重试。\n";
+                            cout << "💡 提示: 输入 -1 -1 -1 可以查看正确答案。\n";
+                        }
+                        break;
+                    }
+                }
             }
             else {
                 cout << "错误: 生成的题目无解!\n";
@@ -565,13 +749,13 @@ int main() {
 
         case 0:
             cout << "\n╔═══════════════════════════════════════════╗\n";
-            cout << "║        👋 感谢使用SAT求解器与数独游戏!     ║\n";
-            cout << "║              🎉 期待下次再见! 🎉          ║\n";
+            cout << "║      👋 感谢使用SAT求解器与数独游戏!      ║\n";
+            cout << "║            🎉 期待下次再见! 🎉            ║\n";
             cout << "╚═══════════════════════════════════════════╝\n";
             break;
             
         default:
-            cout << "❌ 无效选项! 请选择0-5.\n";
+            cout << "❌ 无效选项! 请选择0-6.\n";
             pauseProgram();
             break;
         }
