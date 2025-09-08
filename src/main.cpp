@@ -274,7 +274,7 @@ int main() {
                         isValid = false;
                         validationResult = "❌ 错误: 发现空子句";
                     } else {
-                        validationResult = "✅ 正确: CNF格式验证通过";
+                        validationResult = "✅ 正确: 格式验证通过";
                     }
                 }
                 
