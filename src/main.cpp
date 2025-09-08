@@ -23,6 +23,12 @@
 #include <string>
 #include <algorithm>
 #include <regex>
+#include <map>
+
+// ==================== 全局变量 ====================
+
+// 用于存储每个文件的DPLL求解时间
+std::map<std::string, double> dpllTimeHistory;
 
 // ==================== 辅助函数 ====================
 
@@ -290,6 +296,10 @@ int main() {
                     cout << "保存结果失败\n";
                 }
                 
+                // 记录当前文件的DPLL求解时间
+                std::string currentFile(fileName);
+                dpllTimeHistory[currentFile] = timeElapsed;
+                
                 free(value);
             }
             pauseProgram();
@@ -350,6 +360,28 @@ int main() {
                 std::string timeStr = std::to_string(timeElapsed * 1000) + " ms";
                 int timePadding = 42 - 15 - timeStr.length(); // 41总宽度 - "优化求解时间: "15字符 - 时间文本长度
                 cout << "║ 优化求解时间: " << timeStr << std::string(timePadding, ' ') << " ║\n";
+                
+                // 检查是否有之前的DPLL求解时间记录，计算优化率
+                std::string currentFile(fileName);
+                if (dpllTimeHistory.find(currentFile) != dpllTimeHistory.end()) {
+                    double previousTime = dpllTimeHistory[currentFile];
+                    double improvementRatio = ((previousTime - timeElapsed) / previousTime) * 100;
+                    
+                    cout << "╠═══════════════════════════════════════════╣\n";
+                    std::string improvementStr;
+                    if (improvementRatio > 0) {
+                        improvementStr = "🚀 性能提升: " + std::to_string((int)improvementRatio) + "%";
+                    } else {
+                        improvementStr = "⚠️  性能变化: " + std::to_string((int)abs(improvementRatio)) + "% (较慢)";
+                    }
+                    int improvementPadding = 43 - improvementStr.length() + 4; // +4 for emoji width compensation
+                    cout << "║ " << improvementStr << std::string(max(0, improvementPadding), ' ') << " ║\n";
+                    
+                    std::string comparisonStr = "vs 普通DPLL: " + std::to_string(previousTime * 1000) + " ms";
+                    int comparisonPadding = 43 - comparisonStr.length();
+                    cout << "║ " << comparisonStr << std::string(max(0, comparisonPadding), ' ') << " ║\n";
+                }
+                
                 cout << "╚═══════════════════════════════════════════╝\n";
 
                 // 保存结果
