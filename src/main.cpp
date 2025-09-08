@@ -274,18 +274,18 @@ int main() {
                         isValid = false;
                         validationResult = "❌ 错误: 发现空子句";
                     } else {
-                        validationResult = "✅ CNF格式验证通过";
+                        validationResult = "✅ 正确: CNF格式验证通过";
                     }
                 }
                 
                 // 显示验证结果
-                int validationPadding = 48 - validationResult.length() + (isValid ? 0 : 4); // emoji补偿
+                int validationPadding = 50 - validationResult.length(); // 固定使用43作为基准宽度
                 cout << "║ " << validationResult << std::string(max(0, validationPadding), ' ') << " ║\n";
                 cout << "╚═══════════════════════════════════════════╝\n";
                 
                 if (!isValid) {
                     cout << "\n⚠️  CNF文件格式不合法，无法进行SAT求解!\n";
-                    cout << "请检查文件格式是否符合DIMACS标准。\n";
+                    cout << "请检查文件格式是否符合标准。\n";
                     // 清理无效的CNF数据
                     destroyClause(CNFList);
                     CNFList = nullptr;
