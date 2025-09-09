@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <regex>
 #include <map>
+#include <chrono>
 
 // ==================== 全局变量 ====================
 
@@ -170,7 +171,7 @@ int main() {
     // 初始化变量
     SATList* CNFList = nullptr;
     srand((unsigned)time(0));
-    clock_t start, finish;
+    std::chrono::high_resolution_clock::time_point start, finish;
     double timeElapsed;
     int op = 1, i, result;
     int* value;
@@ -198,7 +199,7 @@ int main() {
             cout << "╚═══════════════════════════════════════════╝\n";
             
             // 扫描config目录下的.cnf文件
-            std::string configDir = "/Users/hesiqi/SAT/cnf";
+            std::string configDir = "../cnf";
             std::vector<std::string> cnfFiles = getCnfFiles(configDir);
             
             // 让用户选择文件
@@ -374,11 +375,12 @@ int main() {
                 for (i = 1; i <= boolCount; i++) value[i] = 1;
 
                 // 计时求解
-                start = clock();
+                start = std::chrono::high_resolution_clock::now();
                 result = DPLL(CNFList, value);
-                finish = clock();
+                finish = std::chrono::high_resolution_clock::now();
                 
-                timeElapsed = (double)(finish - start) / CLOCKS_PER_SEC;
+                auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start);
+                timeElapsed = duration.count() / 1000000.0;
                 
                 // 显示结果
                 cout << "\n╔═══════════════════════════════════════════╗\n";
@@ -448,11 +450,12 @@ int main() {
                 for (i = 1; i <= boolCount; i++) value[i] = 1;
 
                 // 计时求解
-                start = clock();
+                start = std::chrono::high_resolution_clock::now();
                 result = DPLL_Optimized(CNFList, value);
-                finish = clock();
+                finish = std::chrono::high_resolution_clock::now();
                 
-                timeElapsed = (double)(finish - start) / CLOCKS_PER_SEC;
+                auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start);
+                timeElapsed = duration.count() / 1000000.0;
                 
                 // 显示结果
                 cout << "\n╔═══════════════════════════════════════════╗\n";
@@ -462,6 +465,7 @@ int main() {
                 // 结果行
                 std::string resultText = result ? "✅ SAT (可满足)" : "❌ UNSAT (不可满足)";
                 int resultPadding = 43 - 4 - resultText.length(); // 41总宽度 - "结果: "4字符 - 结果文本长度
+                if(!result) resultPadding = resultPadding + 1;
                 cout << "║ 结果: " << resultText << std::string(resultPadding, ' ') << " ║\n";
                 
                 if (result == 1) {
@@ -540,11 +544,12 @@ int main() {
                 for (i = 1; i <= boolCount; i++) value[i] = 1;
 
                 // 计时求解
-                start = clock();
+                start = std::chrono::high_resolution_clock::now();
                 result = DPLL_DualCore(CNFList, value);
-                finish = clock();
+                finish = std::chrono::high_resolution_clock::now();
                 
-                timeElapsed = (double)(finish - start) / CLOCKS_PER_SEC;
+                auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start);
+                timeElapsed = duration.count() / 1000000.0;
                 
                 // 显示结果
                 cout << "\n╔═══════════════════════════════════════════╗\n";
@@ -554,6 +559,7 @@ int main() {
                 // 结果行
                 std::string resultText = result ? "✅ SAT (可满足)" : "❌ UNSAT (不可满足)";
                 int resultPadding = 43 - 4 - resultText.length(); // 41总宽度 - "结果: "4字符 - 结果文本长度
+                if(!result) resultPadding = resultPadding + 1;
                 cout << "║ 结果: " << resultText << std::string(resultPadding, ' ') << " ║\n";
                 
                 if (result == 1) {
@@ -622,10 +628,11 @@ int main() {
             
             for (int i = 0; i < MAX_VAR; i++) sudokuValue[i] = 1;
 
-            clock_t sudokuStart = clock();
+            auto sudokuStart = std::chrono::high_resolution_clock::now();
             int sudokuResult = DPLL(CNFList, sudokuValue);
-            clock_t sudokuFinish = clock();
-            double sudokuTime = (double)(sudokuFinish - sudokuStart) / CLOCKS_PER_SEC;
+            auto sudokuFinish = std::chrono::high_resolution_clock::now();
+            auto sudokuDuration = std::chrono::duration_cast<std::chrono::microseconds>(sudokuFinish - sudokuStart);
+            double sudokuTime = sudokuDuration.count() / 1000000.0;
             
             cout << "⏱️  DPLL求解时间: " << sudokuTime * 1000 << " ms\n\n";
 
